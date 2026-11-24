@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mi mapa - Guayaquil, Daule y San Borondón</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --color-banner:#1b5e20; --color-boton:#2e7d32; --color-texto:#ffffff; --color-panel:#f5f5f5; --fuente:Arial, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: var(--fuente); display:flex; flex-direction:column; height:100vh; }
+  header { background: linear-gradient(135deg, var(--color-banner), #000a); background-color: var(--color-banner); color: var(--color-texto); padding:18px 16px 12px; box-shadow:0 3px 8px #0006; z-index:1000; }
+  header .titulo { font-size:26px; font-weight:bold; margin:0; }
+  header .sub { font-size:13px; opacity:.85; margin:2px 0 10px; }
+  header .botones { display:flex; gap:6px; flex-wrap:wrap; }
+  button, select { padding:8px 11px; border:none; border-radius:8px; background:#fff; color:#222; font-weight:bold; cursor:pointer; font-family:inherit; }
+  header button { background: var(--color-boton); color: var(--color-texto); box-shadow:0 1px 3px #0005; }
+  header button.activo { background:#ff9800; color:#000; }
+  #barra-trazo { display:none; background:#fff3e0; color:#000; padding:7px 12px; font-size:14px; gap:6px; align-items:center; flex-wrap:wrap; border-bottom:2px solid #ff9800; }
+  #cuerpo { flex:1; display:flex; min-height:0; }
+  #map { flex:1; }
+  #panel { width:310px; overflow:auto; background:var(--color-panel); padding:8px; font-size:14px; }
+  #panel h4 { margin:10px 0 4px; }
+  .item { display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid #ddd; cursor:pointer; }
+  .item img { width:44px; height:44px; object-fit:cover; border-radius:6px; }
+  .item .ico { font-size:28px; width:44px; text-align:center; }
+  .item small { color:#666; }
+  .icono-mapa { font-size:26px; text-align:center; line-height:30px; filter: drop-shadow(0 1px 2px #0008); }
+  .popup img { max-width:200px; max-height:150px; display:block; margin:6px 0; border-radius:6px; }
+  .popup button { margin:2px 2px 0 0; }
+  .modal { display:none; position:fixed; inset:0; background:#0008; z-index:2000; align-items:center; justify-content:center; }
+  .modal .caja { background:#fff; padding:14px; border-radius:10px; width:92%; max-width:380px; max-height:92vh; overflow:auto; }
+  .modal input[type=text], .modal textarea, .modal select { width:100%; margin:4px 0 8px; padding:8px; border:1px solid #bbb; font-weight:normal; color:#000; }
+  .modal label { font-weight:bold; font-size:13px; display:block; }
+  .modal input[type=color] { width:60px; height:34px; border:none; padding:0; vertical-align:middle; }
+  .fila-color { display:flex; align-items:center; justify-content:space-between; margin:6px 0; }
+  #fotos { display:flex; flex-wrap:wrap; gap:4px; margin:6px 0; }
+  #fotos .f { position:relative; }
+  #fotos img { width:70px; height:70px; object-fit:cover; border-radius:6px; }
+  #fotos .f span { position:absolute; top:0; right:0; background:#c62828; color:#fff; border-radius:50%; width:20px; height:20px; text-align:center; line-height:20px; cursor:pointer; font-size:12px; }
+  .bg { background:#2e7d32 !important; color:#fff !important; }
+  .bgris { background:#999 !important; color:#fff !important; }
+  .bred { background:#c62828 !important; color:#fff !important; }
+  @media (max-width:700px) { #cuerpo { flex-direction:column; } #panel { width:100%; max-height:34vh; } header .titulo { font-size:20px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="titulo">🗺️ Mi Mapa de Recorridos</div>
+  <div class="sub">Guayaquil · Daule · San Borondón</div>
+  <div class="botones">
+    <button id="btnTrazar">✏️ Trazar recorrido</button>
+    <button id="btnGPS">📍 Estoy aquí</button>
+    <button id="btnCerca">🏪 Locales cercanos</button>
+    <button id="btnVerRec">👁️ Ver recorridos</button>
+    <button id="btnColores">🎨 Colores</button>
+    <button id="btnExp">💾 Respaldo</button>
+    <button id="btnImp">📂 Importar</button>
+    <input type="file" id="archivoImp" accept=".json" style="display:none">
+  </div>
+</header>
+
+<div id="barra-trazo">
+  <b>Trazando:</b> toca el mapa punto por punto.
+  <span id="infoTrazo">0 puntos · 0 km</span>
+  <button id="tDeshacer" class="bgris">↩️ Deshacer punto</button>
+  <button id="tTerminar" class="bg">✔️ Terminar</button>
+  <button id="tCancelar" class="bred">✖️ Cancelar</button>
+</div>
+
+<div id="cuerpo">
+  <div id="map"></div>
+  <div id="panel">
+    <select id="filtro" style="width:100%;margin-bottom:6px"></select>
+    <div id="lista"></div>
+    <h4>Mis recorridos</h4>
+    <div id="listaRec"></div>
+  </div>
+</div>
+
+<!-- Ventana de lugar -->
+<div class="modal" id="modal">
+  <div class="caja">
+    <h3 id="mTitulo" style="margin-top:0">Nuevo lugar</h3>
+    <label>Nombre</label><input type="text" id="mNombre">
+    <label>Tipo de lugar</label><select id="mTipo"></select>
+    <label>Dirección o calle</label><input type="text" id="mDir">
+    <label>Nota</label><textarea id="mNota" rows="3"></textarea>
+    <label>Estado</label>
+    <select id="mVisitado"><option value="1">Ya lo visité</option><option value="0">Quiero ir (pendiente)</option></select>
+    <label>Fotos</label>
+    <input type="file" id="mFoto" accept="image/*" multiple>
+    <div id="fotos"></div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="bg" id="mGuardar">Guardar</button>
+      <button class="bgris" id="mCancelar">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ventana de recorrido -->
+<div class="modal" id="modalRec">
+  <div class="caja">
+    <h3 style="margin-top:0">Guardar recorrido</h3>
+    <label>Nombre del recorrido</label><input type="text" id="rNombre" placeholder="Ej: Salida a Daule">
+    <label>Color de la línea</label><input type="color" id="rColor" value="#e53935">
+    <label style="margin-top:8px">Nota</label><textarea id="rNota" rows="2"></textarea>
+    <p id="rResumen" style="font-size:13px;color:#555"></p>
+    <div style="display:flex;gap:6px">
+      <button class="bg" id="rGuardar">Guardar</button>
+      <button class="bgris" id="rCancelar">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ventana de colores -->
+<div class="modal" id="modalCol">
+  <div class="caja">
+    <h3 style="margin-top:0">🎨 Personalizar página</h3>
+    <div class="fila-color"><label>Color del banner</label><input type="color" id="cBanner"></div>
+    <div class="fila-color"><label>Color de los botones</label><input type="color" id="cBoton"></div>
+    <div class="fila-color"><label>Color de la letra del banner</label><input type="color" id="cTexto"></div>
+    <div class="fila-color"><label>Color del panel lateral</label><input type="color" id="cPanel"></div>
+    <label>Tipo de letra</label>
+    <select id="cFuente">
+      <option value="Arial, sans-serif">Arial</option>
+      <option value="Georgia, serif">Georgia (elegante)</option>
+      <option value="'Trebuchet MS', sans-serif">Trebuchet</option>
+      <option value="'Courier New', monospace">Courier</option>
+      <option value="Verdana, sans-serif">Verdana</option>
+    </select>
+    <label>Título del banner</label><input type="text" id="cTitulo">
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="bg" id="cGuardar">Guardar</button>
+      <button class="bgris" id="cReset">Restablecer</button>
+      <button class="bgris" id="cCerrar">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  // ---------- Mapa centrado entre Guayaquil, Daule y San Borondón ----------
+  var map = L.map('map');
+  map.fitBounds(L.latLngBounds([-2.35, -80.15], [-1.80, -79.70]));
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    maxZoom: 19, subdomains: 'abc', attribution: '&copy; OpenStreetMap France &copy; OpenStreetMap'
+  }).addTo(map);
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s || '').replace(/[&<>"]/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+  // ---------- Tipos de lugar ----------
+  var TIPOS = {
+    restaurante: ['🍽️','Restaurante'], cafe: ['☕','Café'], bar: ['🍺','Bar'],
+    tienda: ['🛍️','Tienda'], super: ['🛒','Supermercado'], farmacia: ['💊','Farmacia'],
+    banco: ['🏦','Banco'], gasolinera: ['⛽','Gasolinera'], hotel: ['🏨','Hotel'],
+    parque: ['🌳','Parque'], salud: ['🏥','Salud'], educacion: ['🎓','Educación'],
+    iglesia: ['⛪','Iglesia'], casa: ['🏠','Casa'], trabajo: ['💼','Trabajo'],
+    prospecto: ['🟦','Prospecto'],
+    otro: ['📍','Otro']
+  };
+  // Logo de Prospecto: una E y una X entrelazadas, en blanco sobre cuadrito celeste
+  var LOGO_EX = '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M15 4.5H6.5V19.5H15"/><path d="M6.5 12H12.5"/>' +
+    '<path d="M10.5 7.5L19.5 16.5"/><path d="M19.5 7.5L10.5 16.5"/></svg>';
+  var CUADRO_E = '<div style="width:28px;height:28px;padding:2px;background:#29b6f6;border:2px solid #fff;border-radius:5px;box-shadow:0 1px 3px #0008">' + LOGO_EX + '</div>';
+  function htmlIcono(tipo, tam) {
+    if (tipo === 'prospecto') return CUADRO_E;
+    return '<div class="icono-mapa"' + (tam ? ' style="font-size:' + tam + 'px"' : '') + '>' + (TIPOS[tipo] || TIPOS.otro)[0] + '</div>';
+  }
+  var selTipo = $('mTipo'), selFiltro = $('filtro');
+  selFiltro.innerHTML = '<option value="todos">Todos los lugares</option><option value="visitados">Solo visitados</option><option value="pendientes">Solo pendientes</option>';
+  for (var k in TIPOS) {
+    selTipo.innerHTML += '<option value="' + k + '">' + TIPOS[k][0] + ' ' + TIPOS[k][1] + '</option>';
+    selFiltro.innerHTML += '<option value="t_' + k + '">' + TIPOS[k][0] + ' ' + TIPOS[k][1] + '</option>';
+  }
+
+  // ---------- Datos guardados ----------
+  var lugares = [], recorridos = [];
+  try { lugares = JSON.parse(localStorage.getItem('lugares2') || '[]'); } catch (e) {}
+  try { recorridos = JSON.parse(localStorage.getItem('recorridos2') || '[]'); } catch (e) {}
+  function guardar() {
+    try {
+      localStorage.setItem('lugares2', JSON.stringify(lugares));
+      localStorage.setItem('recorridos2', JSON.stringify(recorridos));
+    } catch (e) { alert('Se llenó el espacio. Haz un Respaldo y borra fotos viejas.'); }
+  }
+
+  var capaLugares = L.layerGroup().addTo(map);
+  var capaCerca = L.layerGroup().addTo(map);
+  var capaRec = L.layerGroup().addTo(map);
+
+  function icono(tipo, visitado) {
+    return L.divIcon({
+      className: '', iconSize: [30, 30], iconAnchor: [15, 28], popupAnchor: [0, -26],
+      html: '<div style="opacity:' + (visitado ? 1 : 0.55) + '">' + htmlIcono(tipo) + '</div>'
+    });
+  }
+  function pasa(l) {
+    var f = selFiltro.value;
+    if (f === 'todos') return true;
+    if (f === 'visitados') return l.visitado;
+    if (f === 'pendientes') return !l.visitado;
+    return 't_' + l.tipo === f;
+  }
+
+  // ---------- Dibujar lugares ----------
+  function dibujar() {
+    capaLugares.clearLayers();
+    var lista = $('lista'); lista.innerHTML = '';
+    var vis = lugares.filter(pasa);
+    if (!vis.length) lista.innerHTML = '<em>Toca el mapa para agregar un lugar.</em>';
+    vis.forEach(function(l) {
+      var m = L.marker([l.lat, l.lng], { icon: icono(l.tipo, l.visitado) }).addTo(capaLugares);
+      var html = '<div class="popup"><b>' + esc(l.nombre) + '</b><br><small>' + esc(l.dir) + '</small><br>' +
+        (l.visitado ? '✅ Visitado' : '⏳ Pendiente') + ' · <small>' + esc(l.fecha) + '</small><br>' + esc(l.nota);
+      (l.fotos || []).forEach(function(f) { html += '<img src="' + f + '">'; });
+      html += '<br><button class="bg" onclick="editar(' + l.id + ')">Editar</button>' +
+              '<button class="bred" onclick="borrar(' + l.id + ')">Borrar</button></div>';
+      m.bindPopup(html);
+      var div = document.createElement('div'); div.className = 'item';
+      var izq = (l.fotos && l.fotos[0]) ? '<img src="' + l.fotos[0] + '">' : '<div class="ico">' + (l.tipo === 'prospecto' ? '<span style="display:inline-block;width:30px;height:30px;padding:2px;background:#29b6f6;border-radius:5px">' + LOGO_EX + '</span>' : (TIPOS[l.tipo] || TIPOS.otro)[0]) + '</div>';
+      div.innerHTML = izq + '<div><b>' + esc(l.nombre) + '</b><br><small>' + (l.visitado ? '✅' : '⏳') + ' ' + esc(l.dir || (TIPOS[l.tipo] || TIPOS.otro)[1]) + '</small></div>';
+      div.onclick = function() { map.setView([l.lat, l.lng], 16); m.openPopup(); };
+      lista.appendChild(div);
+    });
+  }
+
+  // ---------- Dibujar recorridos guardados ----------
+  var recVisible = true;
+  function km(pts) {
+    var d = 0;
+    for (var i = 1; i < pts.length; i++) d += map.distance(pts[i - 1], pts[i]);
+    return d / 1000;
+  }
+  function dibujarRec() {
+    capaRec.clearLayers();
+    var lista = $('listaRec'); lista.innerHTML = '';
+    if (!recorridos.length) lista.innerHTML = '<em>Aún no has guardado recorridos. Toca "Trazar recorrido".</em>';
+    recorridos.forEach(function(r) {
+      var pl = L.polyline(r.puntos, { color: r.color, weight: 5, opacity: .85 });
+      if (recVisible) pl.addTo(capaRec);
+      pl.bindPopup('<b>' + esc(r.nombre) + '</b><br>' + r.km.toFixed(2) + ' km · ' + esc(r.fecha) + '<br>' + esc(r.nota));
+      var div = document.createElement('div'); div.className = 'item';
+      div.innerHTML = '<div class="ico" style="color:' + r.color + '">━</div><div style="flex:1"><b>' + esc(r.nombre) + '</b><br><small>' + r.km.toFixed(2) + ' km · ' + esc(r.fecha) + '</small></div>';
+      var b = document.createElement('button'); b.className = 'bred'; b.textContent = '🗑️';
+      b.onclick = function(ev) {
+        ev.stopPropagation();
+        if (confirm('¿Borrar el recorrido "' + r.nombre + '"?')) {
+          recorridos = recorridos.filter(function(x) { return x.id !== r.id; });
+          guardar(); dibujarRec();
+        }
+      };
+      div.appendChild(b);
+      div.onclick = function() { map.fitBounds(L.polyline(r.puntos).getBounds(), { padding: [30, 30] }); };
+      lista.appendChild(div);
+    });
+  }
+  $('btnVerRec').onclick = function() {
+    recVisible = !recVisible;
+    this.textContent = recVisible ? '👁️ Ver recorridos' : '🙈 Mostrar recorridos';
+    this.classList.toggle('activo', !recVisible);
+    dibujarRec();
+  };
+
+  // ---------- TRAZAR RECORRIDO punto a punto ----------
+  var trazando = false, puntosT = [], lineaT = null, marcasT = [];
+  function actualizarTrazo() {
+    if (lineaT) map.removeLayer(lineaT);
+    lineaT = puntosT.length > 1 ? L.polyline(puntosT, { color: '#ff9800', weight: 5, dashArray: '8,8' }).addTo(map) : null;
+    marcasT.forEach(function(m) { map.removeLayer(m); });
+    marcasT = puntosT.map(function(p, i) {
+      return L.circleMarker(p, { radius: i === 0 ? 8 : 5, color: '#fff', weight: 2, fillColor: i === 0 ? '#2e7d32' : '#ff9800', fillOpacity: 1 }).addTo(map);
+    });
+    $('infoTrazo').textContent = puntosT.length + ' puntos · ' + km(puntosT).toFixed(2) + ' km';
+  }
+  function limpiarTrazo() {
+    trazando = false; puntosT = []; actualizarTrazo();
+    $('barra-trazo').style.display = 'none';
+    $('btnTrazar').classList.remove('activo');
+    $('btnTrazar').textContent = '✏️ Trazar recorrido';
+    map.getContainer().style.cursor = '';
+  }
+  $('btnTrazar').onclick = function() {
+    if (trazando) { limpiarTrazo(); return; }
+    trazando = true; puntosT = [];
+    $('barra-trazo').style.display = 'flex';
+    this.classList.add('activo'); this.textContent = '✖️ Salir del trazo';
+    map.getContainer().style.cursor = 'crosshair';
+    actualizarTrazo();
+  };
+  $('tDeshacer').onclick = function() { puntosT.pop(); actualizarTrazo(); };
+  $('tCancelar').onclick = limpiarTrazo;
+  $('tTerminar').onclick = function() {
+    if (puntosT.length < 2) { alert('Necesitas al menos 2 puntos.'); return; }
+    $('rNombre').value = ''; $('rNota').value = '';
+    $('rResumen').textContent = puntosT.length + ' puntos · ' + km(puntosT).toFixed(2) + ' km';
+    $('modalRec').style.display = 'flex';
+  };
+  $('rCancelar').onclick = function() { $('modalRec').style.display = 'none'; };
+  $('rGuardar').onclick = function() {
+    var nombre = $('rNombre').value.trim() || ('Recorrido ' + (recorridos.length + 1));
+    recorridos.push({
+      id: Date.now(), nombre: nombre, color: $('rColor').value, nota: $('rNota').value.trim(),
+      puntos: puntosT.slice(), km: km(puntosT), fecha: new Date().toLocaleDateString('es-EC')
+    });
+    guardar(); $('modalRec').style.display = 'none'; limpiarTrazo(); dibujarRec();
+  };
+
+  // ---------- Ventana de lugar ----------
+  var editando = null, fotosTmp = [], posTmp = null;
+  function mostrarFotos() {
+    var c = $('fotos'); c.innerHTML = '';
+    fotosTmp.forEach(function(f, i) {
+      var d = document.createElement('div'); d.className = 'f';
+      d.innerHTML = '<img src="' + f + '"><span>×</span>';
+      d.querySelector('span').onclick = function() { fotosTmp.splice(i, 1); mostrarFotos(); };
+      c.appendChild(d);
+    });
+  }
+  function abrirModal(l, lat, lng, pre) {
+    editando = l ? l.id : null;
+    posTmp = l ? [l.lat, l.lng] : [lat, lng];
+    $('mTitulo').textContent = l ? 'Editar lugar' : 'Nuevo lugar';
+    $('mNombre').value = l ? l.nombre : (pre && pre.nombre) || '';
+    $('mTipo').value = l ? l.tipo : (pre && pre.tipo) || 'otro';
+    $('mDir').value = l ? l.dir : (pre && pre.dir) || '';
+    $('mNota').value = l ? l.nota : '';
+    $('mVisitado').value = l ? (l.visitado ? '1' : '0') : '1';
+    $('mFoto').value = '';
+    fotosTmp = l ? (l.fotos || []).slice() : [];
+    mostrarFotos();
+    $('modal').style.display = 'flex';
+  }
+  function reducir(file, cb) {
+    var r = new FileReader();
+    r.onload = function(e) {
+      var img = new Image();
+      img.onload = function() {
+        var max = 800, w = img.width, h = img.height;
+        if (w > h && w > max) { h = h * max / w; w = max; } else if (h >= w && h > max) { w = w * max / h; h = max; }
+        var c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        cb(c.toDataURL('image/jpeg', 0.7));
+      };
+      img.src = e.target.result;
+    };
+    r.readAsDataURL(file);
+  }
+  $('mFoto').onchange = function() {
+    Array.prototype.forEach.call(this.files, function(f) { reducir(f, function(d) { fotosTmp.push(d); mostrarFotos(); }); });
+  };
+  $('mCancelar').onclick = function() { $('modal').style.display = 'none'; };
+  $('mGuardar').onclick = function() {
+    var nombre = $('mNombre').value.trim();
+    if (!nombre) { alert('Ponle un nombre al lugar.'); return; }
+    var datos = {
+      nombre: nombre, tipo: $('mTipo').value, dir: $('mDir').value.trim(), nota: $('mNota').value.trim(),
+      visitado: $('mVisitado').value === '1', fotos: fotosTmp.slice()
+    };
+    if (editando) {
+      lugares = lugares.map(function(l) { return l.id === editando ? Object.assign(l, datos) : l; });
+    } else {
+      datos.id = Date.now(); datos.lat = posTmp[0]; datos.lng = posTmp[1];
+      datos.fecha = new Date().toLocaleDateString('es-EC');
+      lugares.push(datos);
+    }
+    guardar(); $('modal').style.display = 'none'; map.closePopup(); dibujar();
+  };
+  window.editar = function(id) { var l = lugares.filter(function(x) { return x.id === id; })[0]; if (l) abrirModal(l); };
+  window.borrar = function(id) {
+    if (!confirm('¿Borrar este lugar?')) return;
+    lugares = lugares.filter(function(x) { return x.id !== id; });
+    guardar(); map.closePopup(); dibujar();
+  };
+
+  // ---------- Clic en el mapa: trazar punto o agregar lugar ----------
+  map.on('click', function(e) {
+    var lat = e.latlng.lat, lng = e.latlng.lng;
+    if (trazando) { puntosT.push([lat, lng]); actualizarTrazo(); return; }
+    abrirModal(null, lat, lng);
+    fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&accept-language=es')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d && d.display_name && !$('mDir').value) $('mDir').value = d.display_name.split(',').slice(0, 3).join(',');
+      }).catch(function() {});
+  });
+
+  // ---------- GPS ----------
+  $('btnGPS').onclick = function() {
+    if (!navigator.geolocation) { alert('Tu navegador no tiene GPS.'); return; }
+    navigator.geolocation.getCurrentPosition(function(p) {
+      var lat = p.coords.latitude, lng = p.coords.longitude;
+      map.setView([lat, lng], 17);
+      if (trazando) { puntosT.push([lat, lng]); actualizarTrazo(); }
+      else abrirModal(null, lat, lng);
+    }, function() { alert('No pude obtener tu ubicación.'); });
+  };
+
+  // ---------- Locales cercanos (OpenStreetMap) ----------
+  function tipoDe(t) {
+    var a = t.amenity, s = t.shop, l = t.leisure, tu = t.tourism;
+    if (a === 'restaurant' || a === 'fast_food' || a === 'food_court') return 'restaurante';
+    if (a === 'cafe') return 'cafe';
+    if (a === 'bar' || a === 'pub') return 'bar';
+    if (a === 'pharmacy') return 'farmacia';
+    if (a === 'bank' || a === 'atm') return 'banco';
+    if (a === 'fuel') return 'gasolinera';
+    if (a === 'hospital' || a === 'clinic' || a === 'doctors') return 'salud';
+    if (a === 'school' || a === 'university' || a === 'college') return 'educacion';
+    if (a === 'place_of_worship') return 'iglesia';
+    if (s === 'supermarket' || s === 'convenience') return 'super';
+    if (s) return 'tienda';
+    if (l === 'park') return 'parque';
+    if (tu === 'hotel' || tu === 'hostel' || tu === 'guest_house') return 'hotel';
+    return 'otro';
+  }
+  $('btnCerca').onclick = function() {
+    if (map.getZoom() < 14) { alert('Acércate más al mapa (zoom) y vuelve a tocar el botón.'); return; }
+    var btn = this, txt = btn.textContent; btn.textContent = 'Cargando...';
+    var b = map.getBounds();
+    var bbox = b.getSouth() + ',' + b.getWest() + ',' + b.getNorth() + ',' + b.getEast();
+    var q = '[out:json][timeout:25];(' +
+      'node["amenity"~"restaurant|fast_food|cafe|bar|pub|pharmacy|bank|fuel|hospital|clinic|school|university|place_of_worship"]["name"](' + bbox + ');' +
+      'node["shop"]["name"](' + bbox + ');' +
+      'node["tourism"~"hotel|hostel|guest_house"]["name"](' + bbox + ');' +
+      'node["leisure"="park"]["name"](' + bbox + '););out 150;';
+    fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        capaCerca.clearLayers();
+        d.elements.forEach(function(el) {
+          var t = el.tags || {}, tp = tipoDe(t);
+          var m = L.marker([el.lat, el.lon], { icon: L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11], html: '<div class="icono-mapa" style="font-size:18px;opacity:.85">' + TIPOS[tp][0] + '</div>' }) }).addTo(capaCerca);
+          var dir = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' ');
+          var cont = document.createElement('div');
+          cont.innerHTML = '<b>' + esc(t.name) + '</b><br><small>' + TIPOS[tp][1] + (dir ? ' · ' + esc(dir) : '') + '</small><br>';
+          var bt = document.createElement('button'); bt.className = 'bg'; bt.textContent = 'Agregar a mis lugares';
+          bt.onclick = function() { map.closePopup(); abrirModal(null, el.lat, el.lon, { nombre: t.name, tipo: tp, dir: dir }); };
+          cont.appendChild(bt); m.bindPopup(cont);
+        });
+        btn.textContent = txt;
+        if (!d.elements.length) alert('No encontré locales con nombre en esta zona.');
+      })
+      .catch(function() { btn.textContent = txt; alert('No se pudieron cargar. Revisa tu internet.'); });
+  };
+
+  // ---------- Colores y banner personalizables ----------
+  var TEMA0 = { banner: '#1b5e20', boton: '#2e7d32', texto: '#ffffff', panel: '#f5f5f5', fuente: 'Arial, sans-serif', titulo: '🗺️ Mi Mapa de Recorridos' };
+  var tema = Object.assign({}, TEMA0);
+  try { tema = Object.assign(tema, JSON.parse(localStorage.getItem('tema2') || '{}')); } catch (e) {}
+  function aplicarTema() {
+    var r = document.documentElement.style;
+    r.setProperty('--color-banner', tema.banner); r.setProperty('--color-boton', tema.boton);
+    r.setProperty('--color-texto', tema.texto); r.setProperty('--color-panel', tema.panel);
+    r.setProperty('--fuente', tema.fuente);
+    document.querySelector('header .titulo').textContent = tema.titulo;
+  }
+  $('btnColores').onclick = function() {
+    $('cBanner').value = tema.banner; $('cBoton').value = tema.boton; $('cTexto').value = tema.texto;
+    $('cPanel').value = tema.panel; $('cFuente').value = tema.fuente; $('cTitulo').value = tema.titulo;
+    $('modalCol').style.display = 'flex';
+  };
+  ['cBanner', 'cBoton', 'cTexto', 'cPanel'].forEach(function(id) {
+    $(id).oninput = function() {
+      tema.banner = $('cBanner').value; tema.boton = $('cBoton').value;
+      tema.texto = $('cTexto').value; tema.panel = $('cPanel').value; aplicarTema();
+    };
+  });
+  $('cFuente').onchange = function() { tema.fuente = this.value; aplicarTema(); };
+  $('cGuardar').onclick = function() {
+    tema.titulo = $('cTitulo').value || TEMA0.titulo; aplicarTema();
+    localStorage.setItem('tema2', JSON.stringify(tema)); $('modalCol').style.display = 'none';
+  };
+  $('cReset').onclick = function() { tema = Object.assign({}, TEMA0); localStorage.removeItem('tema2'); aplicarTema(); $('modalCol').style.display = 'none'; };
+  $('cCerrar').onclick = function() { $('modalCol').style.display = 'none'; };
+
+  // ---------- Filtro y respaldo ----------
+  selFiltro.onchange = dibujar;
+  $('btnExp').onclick = function() {
+    var blob = new Blob([JSON.stringify({ lugares: lugares, recorridos: recorridos, tema: tema })], { type: 'application/json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mi-mapa-respaldo.json'; a.click();
+  };
+  $('btnImp').onclick = function() { $('archivoImp').click(); };
+  $('archivoImp').onchange = function() {
+    var f = this.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function(e) {
+      try {
+        var d = JSON.parse(e.target.result);
+        if (Array.isArray(d)) { lugares = d; }
+        else { lugares = d.lugares || []; recorridos = d.recorridos || []; if (d.tema) { tema = Object.assign(tema, d.tema); localStorage.setItem('tema2', JSON.stringify(tema)); } }
+        guardar(); aplicarTema(); dibujar(); dibujarRec(); alert('Listo, todo importado.');
+      } catch (x) { alert('Ese archivo no es válido.'); }
+    };
+    r.readAsText(f);
+  };
+
+  aplicarTema(); dibujar(); dibujarRec();
+</script>
+</body>
+</html>
